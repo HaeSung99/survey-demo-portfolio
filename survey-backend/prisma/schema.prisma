@@ -1,0 +1,136 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+model Survey {
+  /// 설문 고유 식별자
+  id          Int      @id @default(autoincrement())
+  /// 설문 제목
+  title       String   @db.NVarChar(200)
+  /// 설문 설명
+  description String?  @db.NVarChar(1000)
+  /// 설문 활성 여부 (true면 응답 가능)
+  isActive    Boolean  @default(true)
+  /// 설문 생성 시각
+  createdAt   DateTime @default(now())
+  /// 설문 수정 시각
+  updatedAt   DateTime @updatedAt
+
+  /// 설문에 속한 문항들
+  questions Question[]
+  /// 설문에 대한 응답들
+  responses Response[]
+
+  @@index([isActive])
+  @@index([title])
+}
+
+model Question {
+  /// 문항 고유 식별자
+  id             Int    @id @default(autoincrement())
+  /// 소속 설문 ID
+  surveyId       Int
+  /// 설문 내 문항 코드/번호 (예: Q1, Q4-2)
+  code           String @db.NVarChar(50)
+  /// 문항 유형 (SINGLE / MULTI / TEXT / DATE)
+  type           String @db.NVarChar(20)
+  /// 질문 본문
+  text           String @db.NVarChar(1000)
+  /// 분기 없을 때 기본 이동 대상 문항 ID (예: 다음 문항의 id)
+  nextQuestionId Int?
+
+  /// 소속 설문
+  survey Survey @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  /// 해당 문항에 저장된 응답들
+  answers ResponseAnswer[]
+  /// 구조화된 선택지 목록
+  options QuestionOption[]      @relation("QuestionOptionOwner")
+  /// 이 문항을 분기 대상으로 참조하는 선택지들
+  jumpSources QuestionOption[] @relation("QuestionOptionJump")
+  @@unique([surveyId, code])
+  @@index([surveyId])
+  @@index([type])
+  @@index([nextQuestionId])
+}
+
+model Response {
+  /// 응답 고유 식별자
+  id          Int      @id @default(autoincrement())
+  /// 응답이 속한 설문 ID
+  surveyId    Int
+  /// 클라이언트 세션/장치 식별자
+  sessionId   String?  @db.NVarChar(100)
+  /// 응답자 식별자(익명 가능)
+  respondent  String?  @db.NVarChar(100)
+  /// 응답 생성 시각
+  createdAt   DateTime @default(now())
+  /// 응답 마지막 갱신 시각
+  updatedAt   DateTime @updatedAt
+  /// 설문 재개용 토큰 (고유)
+  resumeToken String   @db.NVarChar(100)
+
+  /// 소속 설문
+  survey  Survey           @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  /// 응답에 포함된 답변들
+  answers ResponseAnswer[]
+
+  @@unique([resumeToken])
+  @@index([surveyId])
+  @@index([createdAt])
+}
+
+model ResponseAnswer {
+  /// 응답 답변 고유 식별자
+  id               Int      @id @default(autoincrement())
+  /// 소속 응답 ID
+  responseId       Int
+  /// 답변한 문항 ID
+  questionId       Int
+  /// 단일 선택 값
+  optionValue      String?  @db.NVarChar(50)
+  /// 다중 선택 결과 JSON
+  optionValuesJson String?  @db.NVarChar(4000)
+  /// 기타 입력 텍스트
+  otherText        String?  @db.NVarChar(4000)
+  /// 답변 작성 시각
+  answeredAt       DateTime @default(now())
+
+  /// 소속 응답
+  response Response @relation(fields: [responseId], references: [id], onDelete: Cascade)
+  /// 대상 문항
+  question Question @relation(fields: [questionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([responseId, questionId])
+  @@index([responseId])
+  @@index([questionId])
+}
+
+model QuestionOption {
+  /// 선택지 고유 식별자
+  id               Int     @id @default(autoincrement())
+  /// 소속 문항 ID
+  questionId       Int
+  /// 선택 값(예: 0, 1, 2, A, B)
+  value            String  @db.NVarChar(50)
+  /// 표시 라벨
+  label            String  @db.NVarChar(200)
+  /// 표시 순서
+  order            Int     @default(0) @map("option_order")
+  /// 기타 선택 여부
+  isOther          Boolean @default(false)
+  /// 분기 대상 문항 ID (없으면 기본 흐름)
+  jumpToQuestionId Int?
+
+  /// 소속 문항
+  question   Question  @relation("QuestionOptionOwner", fields: [questionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  /// 분기 대상 문항 (예: 선택지 A → Q4-1)
+  jumpTarget Question? @relation("QuestionOptionJump", fields: [jumpToQuestionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([questionId])
+  @@index([value])
+}

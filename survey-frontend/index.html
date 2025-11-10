@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>설문 응답</title>
+    <script src="lib/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="./env.js" defer></script>
+    <script>
+      window.SURVEY_ENV = window.SURVEY_ENV || {};
+    </script>
+  </head>
+  <body class="min-h-screen bg-slate-100">
+    <header class="bg-white shadow-sm">
+      <div class="mx-auto flex max-w-3xl items-center justify-between px-4 py-4">
+        <h1 class="text-xl font-semibold text-slate-800">설문 응답</h1>
+        <button id="resetProgressBtn" class="rounded border border-rose-200 px-3 py-1 text-sm text-rose-600 hover:bg-rose-50">
+          진행 초기화
+        </button>
+      </div>
+    </header>
+
+    <main class="mx-auto mt-6 max-w-3xl px-4">
+      <section id="surveyInfo" class="mb-6 rounded-lg bg-white p-5 shadow-sm">
+        <h2 class="text-lg font-semibold text-slate-900" id="surveyTitle"></h2>
+        <p class="mt-2 text-sm text-slate-600" id="surveyDescription"></p>
+        <div class="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+          <span id="surveyStatusBadge" class="rounded-full bg-emerald-100 px-2 py-1 text-emerald-700"></span>
+          <span>응답 토큰: <code id="resumeTokenDisplay" class="text-slate-700">-</code></span>
+        </div>
+      </section>
+
+      <section id="entrySection" class="mb-6 rounded-lg bg-white p-6 shadow-sm">
+        <h2 class="text-lg font-semibold text-slate-900">설문 시작하기</h2>
+        <div class="mt-4 grid gap-4 md:grid-cols-2">
+          <div class="rounded border border-slate-200 p-4">
+            <h3 class="text-sm font-semibold text-slate-800">새 설문</h3>
+            <p class="mt-2 text-xs text-slate-500">코드를 입력하지 않으면 새로운 설문 응답으로 진행합니다.</p>
+            <button
+              id="startNewSurveyBtn"
+              class="mt-3 w-full rounded bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+            >
+              새 설문 시작
+            </button>
+          </div>
+          <div class="rounded border border-slate-200 p-4">
+            <h3 class="text-sm font-semibold text-slate-800">코드로 이어하기</h3>
+            <p class="mt-2 text-xs text-slate-500">이전에 발급받은 이어하기 코드를 입력하고 이어하기를 눌러주세요.</p>
+            <div class="mt-3 space-y-2">
+              <input
+                id="resumeCodeInput"
+                type="text"
+                class="w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
+                placeholder="예: 123e4567-e89b-12d3-a456-426614174000"
+              />
+              <button
+                id="resumeSurveyBtn"
+                class="w-full rounded border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                이어하기
+              </button>
+              <p id="resumeError" class="hidden text-xs text-rose-500"></p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="questionContainer" class="hidden rounded-lg bg-white p-6 shadow-sm">
+        <div class="mb-4">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-medium uppercase tracking-wide text-slate-400">현재 문항</span>
+            <span id="questionProgress" class="text-xs text-slate-500"></span>
+          </div>
+          <h3 class="mt-2 text-lg font-semibold text-slate-900" id="questionText"></h3>
+          <p class="mt-1 text-xs text-slate-500" id="questionMeta"></p>
+          <div class="mt-3 h-2 w-full rounded bg-slate-200">
+            <div id="progressBarFill" class="h-2 rounded bg-slate-800 transition-all" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <form id="answerForm" class="space-y-5">
+          <div id="answerFields" class="space-y-4"></div>
+          <div class="flex items-center justify-end gap-3 pt-4">
+            <button
+              type="button"
+              id="backQuestionBtn"
+              class="rounded border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              뒤로가기
+            </button>
+            <button type="submit" class="rounded bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
+              다음으로
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section id="loadingState" class="flex flex-col items-center justify-center gap-4 rounded-lg bg-white p-8 text-center shadow-sm">
+        <div id="loadingSpinner" class="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-slate-500"></div>
+        <p id="loadingText" class="mt-2 text-sm text-slate-500">설문을 불러오는 중입니다...</p>
+        <div id="surveyListContainer" class="mt-6 hidden w-full max-w-2xl text-left">
+          <h3 class="text-sm font-semibold text-slate-700">진행 가능한 설문 목록</h3>
+          <p class="mt-1 text-xs text-slate-500">설문을 선택한 뒤 “설문 시작” 버튼을 눌러 응답을 시작하세요.</p>
+          <div id="surveyList" class="mt-3 space-y-2"></div>
+          <div class="mt-4 flex items-center gap-2">
+            <button
+              id="startSelectedSurveyBtn"
+              class="rounded bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled
+            >
+              설문 시작
+            </button>
+            <span id="surveySelectionMsg" class="text-xs text-slate-500"></span>
+          </div>
+        </div>
+      </section>
+
+      <section id="completionState" class="hidden rounded-lg bg-white p-8 text-center shadow-sm">
+        <h3 class="text-xl font-semibold text-slate-900">응답이 완료되었습니다!</h3>
+        <p class="mt-3 text-sm text-slate-600">응답해 주셔서 감사합니다. 추가로 응답하려면 아래 버튼을 눌러 새로 시작할 수 있습니다.</p>
+        <button id="restartSurveyBtn" class="mt-5 rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500">
+          다시 시작하기
+        </button>
+      </section>
+    </main>
+
+    <script>
+      const envConfig = window.SURVEY_ENV || {};
+      const computedDefaultSurveyId = Number(new URLSearchParams(window.location.search).get('surveyId'));
+      const API_PORT_FALLBACK = envConfig.API_PORT ?? 8000;
+
+      if (envConfig.FRONTEND_PORT) {
+        const expectedPort = Number(envConfig.FRONTEND_PORT);
+        const currentPort = window.location.port
+          ? Number(window.location.port)
+          : window.location.protocol === 'https:'
+            ? 443
+            : 80;
+
+        if (expectedPort && expectedPort !== currentPort) {
+          const target = `${window.location.protocol}//${window.location.hostname}:${expectedPort}${window.location.pathname}${window.location.search}${window.location.hash}`;
+          window.location.replace(target);
+          throw new Error('Redirecting to configured frontend port.');
+        }
+      }
+
+      const BASE_URL =
+        envConfig.API_BASE_URL ||
+        `${window.location.protocol}//${window.location.hostname}${API_PORT_FALLBACK ? `:${API_PORT_FALLBACK}` : ''}`;
+      const defaultSurveyIdCandidate = Number(
+        envConfig.DEFAULT_SURVEY_ID ?? (Number.isFinite(computedDefaultSurveyId) ? computedDefaultSurveyId : NaN),
+      );
+      const defaultSurveyId =
+        Number.isFinite(defaultSurveyIdCandidate) && defaultSurveyIdCandidate > 0 ? defaultSurveyIdCandidate : null;
+
+      let cachedSurveys = [];
+      let surveyData = null;
+      let currentQuestion = null;
+      let answerHistory = [];
+      let currentHistoryIndex = -1;
+      let selectedSurveyId = defaultSurveyId;
+      let activeSurveyId = null;
+      let resumeToken = null;
+      let sessionId = crypto.randomUUID();
+
+      $(document).ready(function () {
+        // 진행 초기화 버튼 이벤트
+        $('#resetProgressBtn').on('click', handleResetProgress);
+        // 완료 화면에서 다시 시작 버튼 이벤트
+        $('#restartSurveyBtn').on('click', startNewSurvey);
+        // 새 설문 시작 버튼 이벤트
+        $('#startNewSurveyBtn').on('click', startNewSurvey);
+        // 선택 설문 시작 버튼 이벤트
+        $('#startSelectedSurveyBtn').on('click', startNewSurvey);
+        // 이어하기 버튼 이벤트
+        $('#resumeSurveyBtn').on('click', handleResumeSurvey);
+        // 이어하기 입력 엔터 이벤트
+        $('#resumeCodeInput').on('keypress', function (event) {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            handleResumeSurvey();
+          }
+        });
+        // 이전 문항 버튼 이벤트
+        $('#backQuestionBtn').on('click', handleBackQuestion);
+        // 답변 제출 폼 이벤트
+        $('#answerForm').on('submit', handleSubmitAnswer);
+
+        updateResumeTokenDisplay();
+
+        let cachedSurveys = [];
+
+        // 설문 목록 불러오기
+        function fetchSurveyList() {
+          return $.getJSON(`${BASE_URL}/surveys`)
+            .then((surveys) => {
+              cachedSurveys = Array.isArray(surveys) ? [...surveys] : [];
+              renderSurveyList(cachedSurveys);
+              return cachedSurveys;
+            })
+            .catch(() => {
+              cachedSurveys = [];
+              $('#surveySelectionMsg').text('설문 목록을 불러오지 못했습니다. 새로고침 후 다시 시도해주세요.');
+              throw new Error('FAILED_FETCH_SURVEY_LIST');
+            });
+        }
+
+        // 설문 선택 카드 렌더링
+        function renderSurveyList(surveys) {
+          cachedSurveys = Array.isArray(surveys) ? [...surveys] : [];
+          const $container = $('#surveyList');
+          $container.empty();
+
+          $('#surveyListContainer').removeClass('hidden');
+
+          if (!cachedSurveys.length) {
+            $('#surveySelectionMsg').text('진행 가능한 설문이 없습니다.');
+            $('#startSelectedSurveyBtn').prop('disabled', true);
+            return;
+          }
+
+          cachedSurveys.forEach((survey) => {
+            const isSelected = survey.id === selectedSurveyId;
+            const baseClass = 'w-full rounded border bg-white px-4 py-3 text-left transition hover:border-slate-400';
+            const stateClass = isSelected ? 'border-slate-500 ring-2 ring-slate-400' : 'border-slate-200';
+            const $card = $('<button>', {
+              type: 'button',
+              class: `${baseClass} ${stateClass}`,
+            });
+
+            $card.on('click', () => {
+              if (selectedSurveyId === survey.id) {
+                $('#surveySelectionMsg').text(`이미 선택된 설문입니다: ${survey.title}`);
+                return;
+              }
+
+              selectSurvey(survey);
+              renderSurveyList(cachedSurveys);
+            });
+
+            $('<h4>', { class: 'text-sm font-semibold text-slate-800', text: survey.title }).appendTo($card);
+            $('<p>', { class: 'mt-1 text-xs text-slate-500', text: survey.description || '설명 없음' }).appendTo($card);
+
+            $card.appendTo($container);
+          });
+
+          if (selectedSurveyId) {
+            const selected = cachedSurveys.find((survey) => survey.id === selectedSurveyId);
+            if (selected) {
+              $('#surveySelectionMsg').text(`선택한 설문: ${selected.title} (설문 시작 버튼을 눌러주세요.)`);
+              $('#startSelectedSurveyBtn').prop('disabled', false);
+              return;
+            }
+          }
+
+          $('#surveySelectionMsg').text('설문을 선택하고 시작 버튼을 눌러주세요.');
+          $('#startSelectedSurveyBtn').prop('disabled', true);
+        }
+
+        fetchSurveyList()
+          .then((surveys) => {
+            if (!Array.isArray(surveys) || !surveys.length) {
+              $('#loadingSpinner').addClass('hidden');
+              $('#loadingText')
+                .removeClass('hidden')
+                .text('진행 가능한 설문이 없습니다.');
+              return;
+            }
+
+            let initialSelection = null;
+            if (selectedSurveyId) {
+              initialSelection = surveys.find((survey) => survey.id === selectedSurveyId) ?? null;
+            }
+            if (!initialSelection) {
+              initialSelection =
+                surveys.find((survey) => defaultSurveyId && survey.id === defaultSurveyId) ?? surveys[0];
+            }
+
+            if (initialSelection) {
+              selectSurvey(initialSelection);
+            }
+            renderSurveyList(surveys);
+
+            $('#loadingSpinner').addClass('hidden');
+            $('#loadingText').addClass('hidden');
+          })
+          .catch(showLoadError);
+      });
+
+      // 설문 선택 상태 저장
+      function selectSurvey(survey) {
+        selectedSurveyId = survey.id;
+        surveyData = null;
+        activeSurveyId = null;
+        clearProgressState();
+        $('#surveyTitle').text(survey.title);
+        $('#surveyDescription').text(survey.description || '설문 설명이 제공되지 않았습니다.');
+        $('#surveyStatusBadge').text(survey.isActive ? '응답 가능' : '비활성');
+        $('#surveySelectionMsg').text(`선택한 설문: ${survey.title} (설문 시작 버튼을 눌러주세요.)`);
+        $('#startSelectedSurveyBtn').prop('disabled', false);
+        showEntrySection();
+      }
+
+      // 설문 상세 데이터 확보
+      function ensureSurveyDataLoaded() {
+        if (!selectedSurveyId) {
+          return $.Deferred().reject(new Error('NO_SELECTION')).promise();
+        }
+
+        if (surveyData && surveyData.id === selectedSurveyId) {
+          return $.Deferred().resolve(surveyData).promise();
+        }
+
+        $('#loadingSpinner').removeClass('hidden');
+        $('#loadingText')
+          .removeClass('hidden text-rose-500')
+          .text('설문을 불러오는 중입니다...');
+
+        return $.getJSON(`${BASE_URL}/surveys/${selectedSurveyId}`)
+          .then((data) => {
+            surveyData = data;
+            activeSurveyId = selectedSurveyId;
+            updateSurveyInfo();
+            showEntrySection();
+            $('#loadingSpinner').addClass('hidden');
+            $('#loadingText').addClass('hidden');
+            return data;
+          })
+          .catch((xhr) => {
+            const message = xhr?.responseJSON?.message || '선택한 설문 정보를 불러오지 못했습니다.';
+            $('#surveySelectionMsg').text(message);
+            $('#loadingSpinner').addClass('hidden');
+            $('#loadingText').removeClass('hidden').addClass('text-rose-500').text(message);
+            $('#startSelectedSurveyBtn').prop('disabled', true);
+            throw new Error(message);
+          });
+      }
+
+      // 상단 설문 정보 갱신
+      function updateSurveyInfo() {
+        $('#surveyTitle').text(surveyData.title);
+        $('#surveyDescription').text(surveyData.description || '설문 설명이 제공되지 않았습니다.');
+        $('#surveyStatusBadge').text(surveyData.isActive ? '응답 가능' : '비활성');
+        updateResumeTokenDisplay();
+      }
+
+      // 이어하기 토큰 표시 갱신
+      function updateResumeTokenDisplay() {
+        $('#resumeTokenDisplay').text(resumeToken ?? '-');
+      }
+
+      // 설문 시작 섹션 표시
+      function showEntrySection() {
+        $('#entrySection').removeClass('hidden');
+        $('#questionContainer').addClass('hidden');
+        $('#completionState').addClass('hidden');
+        $('#surveyListContainer').removeClass('hidden');
+        $('#resumeError').addClass('hidden').text('');
+        $('#resumeCodeInput').val(resumeToken ?? '');
+        currentQuestion = null;
+        currentHistoryIndex = answerHistory.length - 1;
+        updateProgressIndicator();
+        updateNavigationState();
+      }
+
+      // 응답 진행 상태 초기화
+      function clearProgressState() {
+        resumeToken = null;
+        answerHistory = [];
+        currentHistoryIndex = -1;
+        sessionId = crypto.randomUUID();
+        updateResumeTokenDisplay();
+        $('#resumeCodeInput').val('');
+        updateProgressIndicator();
+      }
+
+      // 진행 초기화 버튼 처리
+      function handleResetProgress() {
+        clearProgressState();
+        showEntrySection();
+      }
+
+      // 새 설문 시작 처리
+      function startNewSurvey(event) {
+        if (event) event.preventDefault();
+        if (!selectedSurveyId) {
+          alert('먼저 설문을 선택해주세요.');
+          return;
+        }
+
+        ensureSurveyDataLoaded()
+          .then(() => {
+            if (!surveyData || !Array.isArray(surveyData.questions) || !surveyData.questions.length) {
+              showCompletion();
+              return;
+            }
+
+            clearProgressState();
+            $('#completionState').addClass('hidden');
+            $('#entrySection').addClass('hidden');
+            $('#surveyListContainer').addClass('hidden');
+
+            const firstQuestion = surveyData.questions[0];
+            if (!firstQuestion) {
+              showCompletion();
+              return;
+            }
+
+            showQuestion(firstQuestion);
+          })
+          .catch(() => {});
+      }
+
+      // 이어하기 요청 처리
+      function handleResumeSurvey(event) {
+        if (event) event.preventDefault();
+        if (!selectedSurveyId) {
+          showResumeError('먼저 설문을 선택해주세요.');
+          return;
+        }
+
+        const code = $('#resumeCodeInput').val().trim();
+        if (!code) {
+          showResumeError('코드를 입력해주세요.');
+          return;
+        }
+
+        ensureSurveyDataLoaded()
+          .then(() => {
+            attemptResume(code);
+          })
+          .catch(() => {});
+      }
+
+      // 이어하기 오류 메시지 표시
+      function showResumeError(message) {
+        $('#resumeError').removeClass('hidden').text(message);
+      }
+
+      // 이어하기 토큰 검증 및 복원
+      function attemptResume(token, { fromAuto = false } = {}) {
+        $('#resumeSurveyBtn').prop('disabled', true);
+        $('#resumeError').addClass('hidden').text('');
+
+        return $.getJSON(`${BASE_URL}/surveys/${activeSurveyId}/responses/resume/${token}`)
+          .done((result) => {
+            resumeToken = result.resumeToken || token;
+            updateResumeTokenDisplay();
+
+            const historySource = Array.isArray(result.history) ? result.history : [];
+            const reconstructedHistory = [];
+            for (const entry of historySource) {
+              reconstructedHistory.push({
+                questionCode: entry.questionCode,
+                answer: {
+                  optionValue: entry.answer?.optionValue ?? null,
+                  optionValues: Array.isArray(entry.answer?.optionValues)
+                    ? [...entry.answer.optionValues]
+                    : [],
+                  otherText: entry.answer?.otherText ?? null,
+                },
+              });
+            }
+            answerHistory = reconstructedHistory;
+            updateProgressIndicator();
+
+            $('#entrySection').addClass('hidden');
+
+            if (answerHistory.length > 0) {
+              const lastEntry = answerHistory[answerHistory.length - 1];
+              const question = findQuestion(lastEntry.questionCode);
+              if (question) {
+                showQuestion(question, lastEntry.answer);
+                return;
+              }
+            }
+
+            if (result.nextQuestionCode) {
+              if (result.nextQuestionCode.toUpperCase() === 'END') {
+                showCompletion();
+                return;
+              }
+
+              const nextQuestion = findQuestion(result.nextQuestionCode) || surveyData.questions[0];
+              if (nextQuestion) {
+                showQuestion(nextQuestion);
+                return;
+              }
+            }
+
+            showCompletion();
+          })
+          .fail((xhr) => {
+            if (!fromAuto) {
+              showResumeError(xhr.responseJSON?.message || '유효한 코드가 아닙니다.');
+            }
+            clearProgressState();
+            showEntrySection();
+          })
+          .always(() => {
+            $('#resumeSurveyBtn').prop('disabled', false);
+          });
+      }
+
+      // 문항 코드로 질문 찾기
+      function findQuestion(code) {
+        return surveyData.questions.find((question) => question.code === code) ?? null;
+      }
+
+      // 문항 표시 및 폼 구성
+      function showQuestion(question, prefillAnswer = null) {
+        currentQuestion = question;
+        currentHistoryIndex = answerHistory.findIndex((entry) => entry.questionCode === question.code);
+        const answerToApply = prefillAnswer || (currentHistoryIndex >= 0 ? answerHistory[currentHistoryIndex].answer : null);
+
+        $('#questionText').text(question.text);
+        $('#questionMeta').text(`문항 코드: ${question.code} · 유형: ${question.type}`);
+
+        const $fields = $('#answerFields').empty();
+        const fieldIdPrefix = `q_${question.code}`;
+        const lowerType = question.type.toUpperCase();
+
+        if (lowerType === 'SINGLE') {
+          renderSingleChoice(question, $fields, fieldIdPrefix);
+        } else if (lowerType === 'MULTI') {
+          renderMultiChoice(question, $fields, fieldIdPrefix);
+        } else if (lowerType === 'TEXT') {
+          renderTextField(question, $fields, fieldIdPrefix);
+        } else if (lowerType === 'DATE') {
+          renderDateField(question, $fields, fieldIdPrefix);
+        } else {
+          $('<p>', { class: 'text-sm text-rose-500', text: '지원되지 않는 문항 유형입니다.' }).appendTo($fields);
+        }
+
+        applyPrefill(question, answerToApply);
+
+        $('#entrySection').addClass('hidden');
+        $('#questionContainer').removeClass('hidden');
+        $('#completionState').addClass('hidden');
+        $('#surveyListContainer').addClass('hidden');
+
+        updateProgressIndicator();
+        updateNavigationState();
+      }
+
+      // 기존 응답 값 채워넣기
+      function applyPrefill(question, answer) {
+        if (!answer) return;
+        const code = question.code;
+        const lowerType = question.type.toUpperCase();
+
+        if (lowerType === 'SINGLE') {
+          if (answer.optionValue != null) {
+            $(`input[name="q_${code}_single"][value="${answer.optionValue}"]`).prop('checked', true);
+          }
+          if (answer.otherText) {
+            $(`#q_${code}_other_text`).val(answer.otherText);
+          }
+        } else if (lowerType === 'MULTI') {
+          if (Array.isArray(answer.optionValues)) {
+            answer.optionValues.forEach((value) => {
+              $(`input[name="q_${code}_multi"][value="${value}"]`).prop('checked', true);
+            });
+          }
+          if (answer.otherText) {
+            $(`#q_${code}_other_text`).val(answer.otherText);
+          }
+        } else if (lowerType === 'TEXT') {
+          if (answer.otherText) {
+            $(`#q_${code}_text`).val(answer.otherText);
+          }
+        } else if (lowerType === 'DATE') {
+          if (answer.otherText) {
+            $(`#q_${code}_date`).val(answer.otherText);
+          }
+        }
+      }
+
+      // 진행률 표시 갱신
+      function updateProgressIndicator({ forceComplete = false } = {}) {
+        const $progressText = $('#questionProgress');
+        const $progressBar = $('#progressBarFill');
+
+        if (!surveyData || !Array.isArray(surveyData.questions) || !surveyData.questions.length) {
+          $progressText.text('');
+          $progressBar.css('width', '0%');
+          return;
+        }
+
+        const total = surveyData.questions.length;
+        const answeredCodes = new Set();
+        answerHistory.forEach((entry) => {
+          if (entry?.questionCode) {
+            answeredCodes.add(entry.questionCode);
+          }
+        });
+
+        let completedCount = answeredCodes.size;
+        if (forceComplete) {
+          completedCount = total;
+        }
+
+        const questionIndex =
+          currentQuestion && Array.isArray(surveyData.questions)
+            ? surveyData.questions.findIndex((question) => question.code === currentQuestion.code)
+            : -1;
+        const currentPosition = questionIndex >= 0 ? questionIndex + 1 : 0;
+        const percent = Math.min(100, Math.round((completedCount / total) * 100));
+        const progressText = currentPosition
+          ? `문항 ${currentPosition}/${total} · 완료 ${percent}%`
+          : `완료 ${percent}%`;
+
+        $progressText.text(progressText);
+        $progressBar.css('width', `${percent}%`);
+      }
+
+      // 뒤로가기 버튼 상태 갱신
+      function updateNavigationState() {
+        const hasPrevious =
+          (currentHistoryIndex > 0) ||
+          (currentHistoryIndex === -1 && answerHistory.length > 0);
+        $('#backQuestionBtn').prop('disabled', !hasPrevious);
+      }
+
+      // 이전 문항 이동 처리
+      function handleBackQuestion() {
+        if (currentHistoryIndex === -1) {
+          if (answerHistory.length === 0) return;
+          const targetEntry = answerHistory[answerHistory.length - 1];
+          const question = findQuestion(targetEntry.questionCode);
+          if (question) {
+            showQuestion(question, targetEntry.answer);
+          }
+          return;
+        }
+
+        if (currentHistoryIndex <= 0) return;
+
+        const targetEntry = answerHistory[currentHistoryIndex - 1];
+        const question = findQuestion(targetEntry.questionCode);
+        if (question) {
+          showQuestion(question, targetEntry.answer);
+        }
+      }
+
+      // 응답 제출 처리
+      function handleSubmitAnswer(event) {
+        event.preventDefault();
+        if (!currentQuestion) return;
+
+        const answerPayload = buildAnswerPayload(currentQuestion);
+        if (!answerPayload) {
+          alert('응답을 입력해주세요.');
+          return;
+        }
+
+        const payload = {
+          sessionId,
+          resumeToken,
+          answers: [answerPayload],
+        };
+
+        const $submitButton = $('#answerForm button[type="submit"]');
+        $submitButton.prop('disabled', true).addClass('opacity-60');
+
+        $.ajax({
+          url: `${BASE_URL}/surveys/${activeSurveyId}/responses`,
+          method: 'POST',
+          contentType: 'application/json',
+          data: JSON.stringify(payload),
+        })
+          .done((result) => {
+            resumeToken = result.resumeToken;
+            updateResumeTokenDisplay();
+
+            updateHistoryWithAnswer(answerPayload);
+            currentHistoryIndex = answerHistory.findIndex((entry) => entry.questionCode === currentQuestion.code);
+
+            if (result.nextQuestionCode) {
+              if (result.nextQuestionCode.toUpperCase() === 'END') {
+                showCompletion();
+                return;
+              }
+
+              const nextQuestion = findQuestion(result.nextQuestionCode);
+              if (nextQuestion) {
+                showQuestion(nextQuestion);
+                return;
+              }
+            }
+
+            showCompletion();
+          })
+          .fail((xhr) => {
+            alert(xhr.responseJSON?.message || '응답 저장 중 문제가 발생했습니다.');
+          })
+          .always(() => {
+            $submitButton.prop('disabled', false).removeClass('opacity-60');
+          });
+      }
+
+      // 응답 이력 업데이트
+      function updateHistoryWithAnswer(answer) {
+        const sanitized = {
+          optionValue: answer.optionValue ?? null,
+          optionValues: Array.isArray(answer.optionValues) ? [...answer.optionValues] : [],
+          otherText: answer.otherText ?? null,
+        };
+
+        const idx = answerHistory.findIndex((entry) => entry.questionCode === answer.questionCode);
+        if (idx >= 0) {
+          answerHistory = [
+            ...answerHistory.slice(0, idx),
+            { questionCode: answer.questionCode, answer: sanitized },
+          ];
+        } else {
+          answerHistory = [...answerHistory, { questionCode: answer.questionCode, answer: sanitized }];
+        }
+
+        updateProgressIndicator();
+      }
+
+      // 기타 선택지 존재 여부 판단
+      function hasOtherOption(question) {
+        return Array.isArray(question?.options) && question.options.some((option) => option.isOther || option.value === '0');
+      }
+
+      // 문항 유형별 응답 페이로드 생성
+      function buildAnswerPayload(question) {
+        const code = question.code;
+        const lowerType = question.type.toUpperCase();
+
+        if (lowerType === 'SINGLE') {
+          const value = $(`input[name="q_${code}_single"]:checked`).val();
+          const normalizedValue = value !== undefined && value !== null ? value.toString() : '';
+          const otherTextRaw = hasOtherOption(question) ? $(`#q_${code}_other_text`).val()?.trim() : null;
+          const otherText = otherTextRaw ? otherTextRaw : null;
+
+          if (!normalizedValue && !otherText) {
+            return null;
+          }
+
+          return {
+            questionCode: code,
+            optionValue: normalizedValue || null,
+            otherText,
+          };
+        }
+
+        if (lowerType === 'MULTI') {
+          const elements = $(`input[name="q_${code}_multi"]:checked`).toArray();
+          const values = [];
+          for (const element of elements) {
+            const val = $(element).val();
+            if (val !== undefined && val !== null) {
+              const text = val.toString();
+              if (text) {
+                values.push(text);
+              }
+            }
+          }
+          const otherTextRaw = hasOtherOption(question) ? $(`#q_${code}_other_text`).val()?.trim() : null;
+          const otherText = otherTextRaw ? otherTextRaw : null;
+
+          if (!values.length && !otherText) {
+            return null;
+          }
+
+          return {
+            questionCode: code,
+            optionValues: values,
+            otherText,
+          };
+        }
+
+        if (lowerType === 'TEXT') {
+          const textValue = $(`#q_${code}_text`).val()?.trim();
+          if (!textValue) {
+            return null;
+          }
+
+          return {
+            questionCode: code,
+            otherText: textValue,
+          };
+        }
+
+        if (lowerType === 'DATE') {
+          const dateValue = $(`#q_${code}_date`).val();
+          if (!dateValue) {
+            return null;
+          }
+
+          return {
+            questionCode: code,
+            otherText: dateValue,
+          };
+        }
+
+        return null;
+      }
+
+      // 단일 선택 문항 렌더링
+      function renderSingleChoice(question, $fields, prefix) {
+        const groupName = `${prefix}_single`;
+        const allowOther = hasOtherOption(question);
+        const otherOption = allowOther ? question.options.find((option) => option.isOther || option.value === '0') : null;
+        question.options.forEach((option, index) => {
+          const optionId = `${groupName}_${index}`;
+          const $wrapper = $('<label>', {
+            class: 'flex items-center gap-3 rounded-md border border-slate-200 px-3 py-2 hover:border-slate-400',
+          });
+
+          $('<input>', {
+            type: 'radio',
+            name: groupName,
+            id: optionId,
+            value: option.value,
+            class: 'h-4 w-4 border-slate-300 text-slate-700 focus:ring-slate-500',
+          }).appendTo($wrapper);
+
+          const $content = $('<div>', { class: 'flex flex-col' });
+          $('<span>', { class: 'text-sm text-slate-800', text: option.label || option.value }).appendTo($content);
+          if (option.jumpTarget?.code) {
+            $('<span>', { class: 'text-xs text-slate-400', text: `선택 시 이동: ${option.jumpTarget.code}` }).appendTo($content);
+          }
+
+          $content.appendTo($wrapper);
+          $wrapper.appendTo($fields);
+        });
+
+        if (allowOther) {
+          const $otherWrapper = $('<div>', { class: 'space-y-2 rounded-md border border-dashed border-slate-200 p-3' });
+          $('<label>', {
+            class: 'text-sm text-slate-700',
+            text: otherOption?.label || '기타 입력',
+          }).appendTo($otherWrapper);
+          $('<textarea>', {
+            id: `${prefix}_other_text`,
+            class: 'w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none',
+            rows: 3,
+            placeholder: '기타 의견을 입력해주세요',
+          }).appendTo($otherWrapper);
+          $otherWrapper.appendTo($fields);
+        }
+      }
+
+      // 복수 선택 문항 렌더링
+      function renderMultiChoice(question, $fields, prefix) {
+        const groupName = `${prefix}_multi`;
+        const allowOther = hasOtherOption(question);
+        const otherOption = allowOther ? question.options.find((option) => option.isOther || option.value === '0') : null;
+        question.options.forEach((option, index) => {
+          const optionId = `${groupName}_${index}`;
+          const $wrapper = $('<label>', {
+            class: 'flex items-center gap-3 rounded-md border border-slate-200 px-3 py-2 hover:border-slate-400',
+          });
+
+          $('<input>', {
+            type: 'checkbox',
+            name: groupName,
+            id: optionId,
+            value: option.value,
+            class: 'h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-500',
+          }).appendTo($wrapper);
+
+          const $content = $('<div>', { class: 'flex flex-col' });
+          $('<span>', { class: 'text-sm text-slate-800', text: option.label || option.value }).appendTo($content);
+          if (option.jumpTarget?.code) {
+            $('<span>', { class: 'text-xs text-slate-400', text: `선택 시 이동: ${option.jumpTarget.code}` }).appendTo($content);
+          }
+
+          $content.appendTo($wrapper);
+          $wrapper.appendTo($fields);
+        });
+
+        if (allowOther) {
+          const $otherWrapper = $('<div>', { class: 'space-y-2 rounded-md border border-dashed border-slate-200 p-3' });
+          $('<label>', {
+            class: 'text-sm text-slate-700',
+            text: otherOption?.label || '기타 입력',
+          }).appendTo($otherWrapper);
+          $('<textarea>', {
+            id: `${prefix}_other_text`,
+            class: 'w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none',
+            rows: 3,
+            placeholder: '기타 의견을 입력해주세요',
+          }).appendTo($otherWrapper);
+          $otherWrapper.appendTo($fields);
+        }
+      }
+
+      // 주관식 문항 렌더링
+      function renderTextField(question, $fields, prefix) {
+        const $wrapper = $('<div>', { class: 'space-y-2' });
+        $('<label>', { class: 'text-sm text-slate-700', text: '응답을 입력해주세요' }).appendTo($wrapper);
+        $('<textarea>', {
+          id: `${prefix}_text`,
+          class: 'w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none',
+          rows: 4,
+        }).appendTo($wrapper);
+        $wrapper.appendTo($fields);
+      }
+
+      // 날짜 입력 문항 렌더링
+      function renderDateField(question, $fields, prefix) {
+        const $wrapper = $('<div>', { class: 'space-y-2' });
+        $('<label>', { class: 'text-sm text-slate-700', text: '날짜를 선택해주세요' }).appendTo($wrapper);
+        $('<input>', {
+          type: 'date',
+          id: `${prefix}_date`,
+          class: 'w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none',
+        }).appendTo($wrapper);
+        $wrapper.appendTo($fields);
+      }
+
+      // 완료 화면 표시
+      function showCompletion() {
+        currentQuestion = null;
+        currentHistoryIndex = answerHistory.length - 1;
+        $('#questionContainer').addClass('hidden');
+        $('#completionState').removeClass('hidden');
+        $('#surveyListContainer').removeClass('hidden');
+        updateProgressIndicator({ forceComplete: true });
+        updateNavigationState();
+      }
+
+      // 설문 로딩 오류 표시
+      function showLoadError(error) {
+        $('#loadingSpinner').addClass('hidden');
+        $('#loadingText')
+          .removeClass('hidden')
+          .addClass('text-rose-500')
+          .html(`설문을 불러오지 못했습니다.<br />${error.message}`);
+      }
+    </script>
+  </body>
+</html>
+
