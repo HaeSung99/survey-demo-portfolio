@@ -1,2 +1,7 @@
 docker-compose.yml
-
+docker-compose.prod.yml
+env.production
+env.production.example
+deployment/
+Dockerfile
+portfolio
